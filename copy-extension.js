@@ -593,12 +593,32 @@ class HealthMonitor {
     
     this.debugExpanded = false;
     this.badgeContainer = null;
+    this.enabled = true; // mirror of chrome.storage.local.isEnabled
     this.init();
   }
 
   init() {
     this.createBadge();
-    
+
+    // Reflect the authoritative enabled state (OFFLINE the moment user stops).
+    try {
+      chrome.storage.local.get(["isEnabled"], (items) => {
+        if (!chrome.runtime.lastError) this.enabled = items.isEnabled !== false;
+        this.updateState();
+      });
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== "local" || !changes.isEnabled) return;
+        this.enabled = changes.isEnabled.newValue !== false;
+        if (!this.enabled) {
+          // Reset live signals so the badge drops to OFFLINE instantly.
+          this.state.translationRunning = false;
+          this.state.overlayRendered = false;
+          this.state.subtitleDetected = false;
+        }
+        this.updateState();
+      });
+    } catch (e) {}
+
     window.addEventListener("videoattached", () => {
       this.state.videoDetected = true;
       this.updateState();
@@ -617,6 +637,7 @@ class HealthMonitor {
     });
     
     window.addEventListener("subtitletranslated", () => {
+      if (!this.enabled) return;
       this.state.translationRunning = true;
       this.state.lastTranslationTimestamp = Date.now();
       this.state.overlayRendered = true;
@@ -721,10 +742,11 @@ class HealthMonitor {
     const now = Date.now();
     const timeSinceLastSubtitle = now - this.state.lastSubtitleTimestamp;
     
-    const isLive = 
-      this.state.videoDetected && 
-      this.state.subtitleDetected && 
-      this.state.translationRunning && 
+    const isLive =
+      this.enabled &&                       // user toggle is authoritative
+      this.state.videoDetected &&
+      this.state.subtitleDetected &&
+      this.state.translationRunning &&
       (timeSinceLastSubtitle < 4000);
       
     // Broadcast state for popup
@@ -767,22 +789,37 @@ window.healthMonitor = new HealthMonitor();`,
 
   "content/translator.js": `/**
  * Live Dual Subtitle Translator - Translation bridge
+ *
+ * The single authority for whether translation runs. Source of truth is
+ * chrome.storage.local.isEnabled (written ONLY by the user via the popup, and
+ * the install default in background.js). Detection (extractor) is fully
+ * decoupled: it keeps observing subtitles, but NOTHING is translated or
+ * rendered unless \`enabled === true\`. "Stop Translation" is authoritative and
+ * never auto-overridden by subtitle detection, SPA navigation, fullscreen,
+ * reconnects, or in-flight requests.
  */
 class TranslationCoordinator {
   constructor() {
     this.settings = null;
-    this.isTranslating = false;
+    this.enabled = null;          // null = not yet restored from storage
+    this.epoch = 0;               // bumped on disable to drop in-flight responses
     this.lastOriginalText = "";
     this.contextHistory = [];
-    this.queue = [];
     this.debounceTimer = null;
+    this.retryTimers = [];
+    this.contextDead = false;
+    this.lastIgnoreLog = 0;
     this.init();
   }
 
-  async init() {
-    await this.loadSettings();
+  init() {
+    // Register listeners synchronously so no event is missed while settings
+    // load, and so the state gate is active immediately.
 
-    chrome.storage.onChanged.addListener(() => {
+    // Single source of truth: react to storage changes (this is also how the
+    // popup "broadcasts" the toggle to every tab/frame).
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area && area !== "local") return;
       this.loadSettings();
     });
 
@@ -794,25 +831,91 @@ class TranslationCoordinator {
     window.addEventListener("subtitlecleared", () => {
       this.lastOriginalText = "";
     });
+
+    this.loadSettings();
+  }
+
+  isContextValid() {
+    try {
+      return !!(chrome.runtime && chrome.runtime.id);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  handleContextDead() {
+    if (this.contextDead) return;
+    this.contextDead = true;
+    this.cancelPending();
+    window.subtitleLogger.log("Translator", "Extension was reloaded — refresh the page to resume translating.");
   }
 
   async loadSettings() {
+    if (!this.isContextValid()) return;
     return new Promise((resolve) => {
-      chrome.storage.local.get([
-        "isEnabled",
-        "sourceLang",
-        "targetLang",
-        "showOriginal",
-        "translateOnly"
-      ], (items) => {
-        this.settings = items;
+      try {
+        chrome.storage.local.get([
+          "isEnabled",
+          "sourceLang",
+          "targetLang",
+          "showOriginal",
+          "translateOnly"
+        ], (items) => {
+          if (chrome.runtime.lastError) { resolve(); return; }
+          this.settings = items;
+          this.setEnabled(items.isEnabled !== false);
+          resolve();
+        });
+      } catch (e) {
+        this.handleContextDead();
         resolve();
-      });
+      }
     });
   }
 
+  /** Apply an authoritative enabled state, running transition side-effects. */
+  setEnabled(on) {
+    const prev = this.enabled;
+    if (prev === on) return;
+    this.enabled = on;
+
+    if (prev === null) return;       // initial restore from storage: no side-effects
+
+    if (on) {
+      window.subtitleLogger.log("Translation Enabled");
+    } else {
+      // STOP: fully halt the pipeline and wipe what's on screen.
+      this.cancelPending();
+      window.subtitleLogger.log("Translation Disabled");
+      window.dispatchEvent(new CustomEvent("subtitlecleared")); // overlay clears
+    }
+  }
+
+  /** Cancel debounce, retries, and invalidate any in-flight responses. */
+  cancelPending() {
+    this.epoch++;
+    clearTimeout(this.debounceTimer);
+    this.debounceTimer = null;
+    this.retryTimers.forEach((t) => clearTimeout(t));
+    this.retryTimers = [];
+    this.lastOriginalText = "";
+    this.contextHistory = [];
+  }
+
   handleNewSubtitle(text, rect, lineHeight) {
-    if (!this.settings || !this.settings.isEnabled) return;
+    if (this.contextDead || !this.isContextValid()) return;
+
+    // User intent is highest priority — detection NEVER auto-restarts translation.
+    if (!this.enabled) {
+      const now = Date.now();
+      if (now - this.lastIgnoreLog > 2000) {
+        this.lastIgnoreLog = now;
+        window.subtitleLogger.log("Translation Ignored — User Disabled");
+      }
+      return;
+    }
+
+    if (!this.settings) return;
     if (!text || text === this.lastOriginalText) return;
 
     this.lastOriginalText = text;
@@ -824,7 +927,6 @@ class TranslationCoordinator {
 
     const context = this.contextHistory.slice(0, -1).join(" | ");
 
-    // Debounce & Queue
     clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => {
       this.processTranslation(text, context, rect, lineHeight);
@@ -832,8 +934,14 @@ class TranslationCoordinator {
   }
 
   processTranslation(text, context, rect, lineHeight, attempt = 1) {
+    // Re-check at every stage so a queued/retried call can't slip through after Stop.
+    if (!this.enabled || this.contextDead || !this.isContextValid()) {
+      if (!this.isContextValid()) this.handleContextDead();
+      return;
+    }
+    const epoch = this.epoch;
     window.subtitleLogger.log("Translator", \`Requesting translation (Attempt \${attempt}):\`, text);
-    
+
     try {
       chrome.runtime.sendMessage({
         action: "translate",
@@ -842,11 +950,16 @@ class TranslationCoordinator {
         targetLang: this.settings.targetLang || "en",
         context: context
       }, (response) => {
+        // Drop the response if translation was disabled (or superseded) meanwhile.
+        if (epoch !== this.epoch || !this.enabled) return;
+
         if (chrome.runtime.lastError) {
-          window.subtitleLogger.error("Translator", "Extension communication error:", chrome.runtime.lastError);
+          const msg = chrome.runtime.lastError.message || "";
+          if (msg.includes("context invalidated")) { this.handleContextDead(); return; }
+          window.subtitleLogger.error("Translator", "Extension communication error:", msg);
           return;
         }
-        
+
         if (response && response.success && response.translatedText) {
           window.subtitleLogger.log("Translator", "Translation success:", response.translatedText);
           window.dispatchEvent(new CustomEvent("subtitletranslated", {
@@ -860,52 +973,64 @@ class TranslationCoordinator {
             }
           }));
         } else if (attempt < 3) {
-          window.subtitleLogger.error("Translator", \`Translation failed, retrying (\${attempt+1}/3)...\`);
-          setTimeout(() => this.processTranslation(text, context, rect, lineHeight, attempt + 1), 500);
+          const t = setTimeout(() => this.processTranslation(text, context, rect, lineHeight, attempt + 1), 500);
+          this.retryTimers.push(t);
         } else {
           window.subtitleLogger.error("Translator", "Max retries reached. Translation failed.");
         }
       });
     } catch (e) {
-      if (e.message.includes("Extension context invalidated")) {
-        console.warn("Translation aborted: Extension was reloaded. Please refresh the page.");
+      if (e.message && e.message.includes("context invalidated")) {
+        this.handleContextDead();
+      } else {
+        window.subtitleLogger.error("Translator", "Unexpected error:", e);
       }
     }
   }
 }
 
-window.translationCoordinator = new TranslationCoordinator();`,
+window.translationCoordinator = new TranslationCoordinator();
+`,
 
   "content/overlay.js": `/**
  * Live Dual Subtitle Translator - Overlay UI
  *
- * Renders the translation in an isolated Shadow-DOM overlay over the video.
- * Modes (style.position):
- *   - "side-by-side": translation to the RIGHT of the native subtitle, aligned
- *     to its top, with an automatic fallback to ABOVE when there isn't enough
- *     horizontal room. Renders the translation ONLY (the player's own caption
- *     is the original).
- *   - "above-original" / "top" / "middle" / default: translation stacked over
- *     the caption (with an optional original copy).
+ * Renders the translation in an isolated Shadow-DOM overlay over the video and
+ * keeps it glued to the live subtitle using a requestAnimationFrame tracker.
  *
- * Sync: listens for "subtitlecleared" so the translation disappears with the
- * original (<100ms), plus a stale-timeout safety net.
+ * Modes (style.position):
+ *   - "side-by-side": translation locked to the RIGHT of the native subtitle,
+ *     vertically aligned to its top. It NEVER auto-switches to another mode —
+ *     if horizontal room is tight it pins a column at the video's right edge and
+ *     wraps; if there is no caption element (native textTrack) it uses a stable
+ *     bottom-right anchor. Renders the translation ONLY (the player's caption is
+ *     the original).
+ *   - "above-original" / "top" / "middle" / "bottom": fixed placements.
+ *
+ * Sync: a rAF loop tracks window.subtitleExtractor.lastSubtitleEl, repositions
+ * the overlay every few frames, and clears it the instant the caption is gone
+ * (also wired to the "subtitlecleared" event). Styles are only written when they
+ * change, so there is no flicker or layout thrashing.
  */
 
-const GAP = 16;             // px between original subtitle and translation
-const MIN_SIDE_WIDTH = 140; // px; below this we fall back to "above"
+const GAP = 16;             // px between the original subtitle and the translation
+const MIN_SIDE_WIDTH = 120; // px minimum width before we pin a right-edge column
 
 class SubtitleOverlayManager {
   constructor() {
     this.overlayContainer = null;
     this.styleConfig = null;
+    this.enabled = true;        // mirror of chrome.storage.local.isEnabled
     this.showOriginal = true;
     this.translateOnly = false;
     this.lastRect = null;
     this.lastLineHeight = null;
     this.renderedKey = null;
+    this.lastBoxKey = null;
+    this.showing = false;
+    this.posRaf = null;
+    this.frame = 0;
     this.staleTimer = null;
-    this.repositionTimer = null;
     this.init();
   }
 
@@ -927,18 +1052,30 @@ class SubtitleOverlayManager {
 
     document.addEventListener("fullscreenchange", () => this.handleFullscreenChange());
     document.addEventListener("webkitfullscreenchange", () => this.handleFullscreenChange());
-    window.addEventListener("resize", () => this.debouncedReposition());
   }
 
   async loadStyles() {
     return new Promise((resolve) => {
-      chrome.storage.local.get(["style", "showOriginal", "translateOnly"], (result) => {
-        this.styleConfig = result.style;
-        this.showOriginal = result.showOriginal !== false;
-        this.translateOnly = result.translateOnly || false;
-        if (this.overlayContainer) this.applyStyleConfig();
+      try {
+        chrome.storage.local.get(["style", "showOriginal", "translateOnly", "isEnabled"], (result) => {
+          if (chrome.runtime.lastError) { resolve(); return; }
+          this.styleConfig = result.style;
+          this.showOriginal = result.showOriginal !== false;
+          this.translateOnly = result.translateOnly || false;
+          this.enabled = result.isEnabled !== false;
+          // If the user disabled translation, wipe anything on screen immediately.
+          if (!this.enabled) {
+            this.clearOverlay();
+          } else {
+            // Force a reposition next frame (mode may have changed).
+            this.lastBoxKey = null;
+            if (this.overlayContainer) this.applyStyleConfig();
+          }
+          resolve();
+        });
+      } catch (e) {
         resolve();
-      });
+      }
     });
   }
 
@@ -1005,7 +1142,6 @@ class SubtitleOverlayManager {
         justify-content: center;
         text-align: center;
         z-index: 10000;
-        transition: opacity 0.15s ease;
       }
       .caption-segment {
         font-family: \${style.font || "system-ui"}, sans-serif;
@@ -1039,11 +1175,41 @@ class SubtitleOverlayManager {
     this.positionOverlay();
   }
 
-  /** Size the wrapper to the video, then place the overlay-box per the mode. */
+  // ── Live tracker ──────────────────────────────────────────
+  startPositionLoop() {
+    if (this.posRaf) return;
+    const loop = () => {
+      if (!this.showing) { this.posRaf = null; return; }
+      this.frame++;
+      if (this.frame % 3 === 0) this.trackAndPosition(); // ~50ms cadence, < 100ms sync
+      this.posRaf = requestAnimationFrame(loop);
+    };
+    this.posRaf = requestAnimationFrame(loop);
+  }
+
+  stopPositionLoop() {
+    if (this.posRaf) cancelAnimationFrame(this.posRaf);
+    this.posRaf = null;
+  }
+
+  trackAndPosition() {
+    const ex = window.subtitleExtractor;
+    // Clear in sync the moment the original subtitle leaves the screen.
+    if (ex && ex.isActive === false) { this.clearOverlay(); return; }
+    // Live-measure the actual caption element so we never use a stale snapshot.
+    if (ex && ex.lastSubtitleEl && document.contains(ex.lastSubtitleEl)) {
+      const r = ex.lastSubtitleEl.getBoundingClientRect();
+      if (r.width > 1 && r.height > 1) this.lastRect = r;
+    }
+    this.resetStaleTimer(); // keep alive while the loop runs
+    this.positionOverlay();
+  }
+
+  // ── Positioning ───────────────────────────────────────────
   positionOverlay() {
     const video = document.querySelector("video");
     const wrapper = document.getElementById("dual-subtitle-overlay-root");
-    if (!video || !wrapper) return;
+    if (!video || !wrapper || !this.overlayContainer) return;
 
     const v = video.getBoundingClientRect();
     wrapper.style.top = v.top + window.scrollY + "px";
@@ -1051,89 +1217,114 @@ class SubtitleOverlayManager {
     wrapper.style.width = v.width + "px";
     wrapper.style.height = v.height + "px";
 
-    const box = this.overlayContainer;
     const style = this.styleConfig || {};
     const offset = style.offsetY || 0;
     const rect = this.lastRect;
+    const mode = style.position || "above-original";
 
-    // Reset positioning state each time.
-    box.style.top = "auto";
-    box.style.bottom = "auto";
-    box.style.left = "50%";
-    box.style.right = "auto";
-    box.style.transform = "translateX(-50%)";
-    box.style.maxWidth = "90%";
-    box.style.width = \`\${style.width || 80}%\`;
-    box.style.alignItems = "center";
+    const s = {
+      top: "auto", bottom: "auto", left: "50%", right: "auto",
+      transform: "translateX(-50%)", maxWidth: "90%",
+      width: mode === "side-by-side" ? "auto" : (style.width || 80) + "%",
+      alignItems: "center",
+    };
 
-    // ── Side-by-side: anchored to the live native subtitle rect ──
-    if (style.position === "side-by-side" && rect && rect.width > 1) {
-      const availableRight = v.right - rect.right - GAP;
-      if (availableRight >= MIN_SIDE_WIDTH) {
-        box.style.left = (rect.right - v.left) + GAP + "px";
-        box.style.top = (rect.top - v.top) + "px";
-        box.style.transform = "none";
-        box.style.width = "auto";
-        box.style.maxWidth = Math.floor(availableRight - 4) + "px";
-        box.style.alignItems = "flex-start";
-        return;
-      }
-      // Not enough horizontal room → fall back to ABOVE the caption.
-      this.positionAbove(v, rect, offset);
-      return;
-    }
-
-    // ── Above the caption when we know where it is ──
-    if (style.position === "above-original" && rect && rect.height > 1) {
-      this.positionAbove(v, rect, offset);
-      return;
-    }
-
-    // ── Fixed modes (no rect needed) ──
-    if (style.position === "top") {
-      box.style.top = (20 + offset) + "px";
-    } else if (style.position === "middle") {
-      box.style.top = "50%";
-      box.style.transform = "translate(-50%, -50%)";
-    } else if (style.position === "above-original") {
-      box.style.bottom = (90 - offset) + "px";
+    if (mode === "side-by-side") {
+      this.computeSideBySide(s, v, rect, offset);
+    } else if (mode === "top") {
+      s.top = (20 + offset) + "px";
+    } else if (mode === "middle") {
+      s.top = "50%";
+      s.transform = "translate(-50%, -50%)";
+    } else if (mode === "above-original" && rect && rect.height > 1) {
+      this.computeAbove(s, v, rect, offset);
+    } else if (mode === "above-original") {
+      s.bottom = (90 - offset) + "px";
     } else {
-      box.style.bottom = (30 + offset) + "px";
+      s.bottom = (30 + offset) + "px";
+    }
+
+    this.applyBoxStyles(s);
+  }
+
+  /** Side-by-side: ALWAYS to the right — no mode flipping. */
+  computeSideBySide(s, v, rect, offset) {
+    s.alignItems = "flex-start";
+    s.transform = "none";
+    s.width = "auto";
+
+    if (rect && rect.width > 1) {
+      let left = (rect.right - v.left) + GAP;
+      let maxW = v.width - left - 8;
+      if (maxW < MIN_SIDE_WIDTH) {
+        // Caption hugs the right edge: pin a column to the video's right side
+        // (still beside the caption row, never above/below it).
+        maxW = Math.min(Math.max(MIN_SIDE_WIDTH, Math.round(v.width * 0.33)), v.width - 16);
+        left = v.width - maxW - 8;
+        if (left < 8) left = 8;
+      }
+      s.left = Math.round(left) + "px";
+      s.top = Math.max(0, Math.round((rect.top - v.top) - offset)) + "px";
+      s.maxWidth = Math.floor(maxW) + "px";
+    } else {
+      // No caption element (native textTrack): stable bottom-right anchor.
+      const panel = Math.min(Math.max(MIN_SIDE_WIDTH, Math.round(v.width * 0.33)), v.width - 16);
+      s.left = (v.width - panel - 8) + "px";
+      s.bottom = (30 + offset) + "px";
+      s.maxWidth = Math.floor(panel) + "px";
     }
   }
 
-  /** Place the box centered just above the subtitle's top edge. */
-  positionAbove(v, rect, offset) {
-    const box = this.overlayContainer;
+  /** Centered just above the subtitle's top edge. */
+  computeAbove(s, v, rect, offset) {
     let bottom = (v.bottom - rect.top) + GAP - offset;
     const maxBottom = v.height - 10;
     if (bottom < 10) bottom = 10;
     if (bottom > maxBottom) bottom = maxBottom;
-    box.style.bottom = bottom + "px";
-    box.style.left = (rect.left - v.left) + rect.width / 2 + "px";
-    box.style.transform = "translateX(-50%)";
-    box.style.width = "auto";
-    box.style.maxWidth = "90%";
+    s.bottom = Math.round(bottom) + "px";
+    s.left = Math.round((rect.left - v.left) + rect.width / 2) + "px";
+    s.transform = "translateX(-50%)";
+    s.width = "auto";
+    s.maxWidth = "90%";
   }
 
+  /** Write styles only when they actually change (no flicker / no thrash). */
+  applyBoxStyles(s) {
+    const key = \`\${s.top}|\${s.bottom}|\${s.left}|\${s.right}|\${s.transform}|\${s.maxWidth}|\${s.width}|\${s.alignItems}\`;
+    if (key === this.lastBoxKey) return;
+    this.lastBoxKey = key;
+    const box = this.overlayContainer;
+    box.style.top = s.top;
+    box.style.bottom = s.bottom;
+    box.style.left = s.left;
+    box.style.right = s.right;
+    box.style.transform = s.transform;
+    box.style.maxWidth = s.maxWidth;
+    box.style.width = s.width;
+    box.style.alignItems = s.alignItems;
+  }
+
+  // ── Render / clear ────────────────────────────────────────
   renderSubtitle(original, translated, rect, lineHeight) {
     if (!translated) return;
+    // Authoritative gate: never render / create overlay while disabled.
+    if (!this.enabled) return;
     const container = this.createOverlayContainer();
     if (!container) return;
 
-    this.lastRect = rect || null;
-    this.lastLineHeight = lineHeight || null;
+    if (rect) { this.lastRect = rect; this.lastLineHeight = lineHeight; }
 
     const style = this.styleConfig || {};
-    const hasRect = !!(rect && rect.width > 1 && rect.height > 1);
+    const hasRect = !!(this.lastRect && this.lastRect.width > 1 && this.lastRect.height > 1);
     // In side-by-side the player's own caption IS the original — never duplicate it.
     const sideBySide = style.position === "side-by-side" && hasRect;
     const renderOriginal = this.showOriginal && !this.translateOnly && !sideBySide;
 
-    // Avoid rebuilding (and re-animating) the DOM when the text is unchanged.
+    // Rebuild (and re-animate) only when the text/mode changed.
     const key = \`\${style.position}|\${translated}|\${renderOriginal ? original : ""}\`;
     if (key !== this.renderedKey) {
       this.renderedKey = key;
+      this.lastBoxKey = null; // content changed -> recompute position
       container.innerHTML = "";
 
       const translatedEl = document.createElement("div");
@@ -1149,33 +1340,34 @@ class SubtitleOverlayManager {
       }
     }
 
-    this.applyStyleConfig(); // re-position (rect may have moved)
+    this.showing = true;
+    this.applyStyleConfig();
     this.resetStaleTimer();
+    this.startPositionLoop();
   }
 
   resetStaleTimer() {
     clearTimeout(this.staleTimer);
-    this.staleTimer = setTimeout(() => this.clearOverlay(), 2000);
+    this.staleTimer = setTimeout(() => this.clearOverlay(), 3000);
   }
 
   clearOverlay() {
+    const hadContent = this.renderedKey !== null;
+    this.showing = false;
+    this.stopPositionLoop();
     clearTimeout(this.staleTimer);
     this.staleTimer = null;
     if (this.overlayContainer) this.overlayContainer.innerHTML = "";
     this.renderedKey = null;
+    this.lastBoxKey = null;
     this.lastRect = null;
     this.lastLineHeight = null;
-  }
-
-  debouncedReposition() {
-    clearTimeout(this.repositionTimer);
-    this.repositionTimer = setTimeout(() => {
-      if (this.overlayContainer) this.positionOverlay();
-    }, 100);
+    if (hadContent) window.subtitleLogger.log("Overlay Cleared");
   }
 
   handleFullscreenChange() {
     setTimeout(() => {
+      this.lastBoxKey = null;
       this.createOverlayContainer();
       this.applyStyleConfig();
     }, 300);
