@@ -1,0 +1,6 @@
+{
+  "name": "Live Dual Subtitle Translator",
+  "description": "Chrome Extension simulator and source exporter for translating video captions in real-time.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
