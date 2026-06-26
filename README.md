@@ -1,22 +1,20 @@
 <div align="center">
-  <img src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" alt="Live Dual Subtitle Translator Logo" width="100%">
-
-  <h1>Live Dual Subtitle Translator</h1>
-  <p><b>Real-time dual subtitle translation for any video using AI.</b></p>
+  <h1>💬 Live Dual Subtitle Translator</h1>
+  <p><b>Real-time dual subtitle translation for streaming platforms and online video.</b></p>
 
   <p>
-    <a href="https://github.com/yashchowdhary14/live-dual-subtitle-translator/releases"><img src="https://img.shields.io/github/v/release/yashchowdhary14/live-dual-subtitle-translator?style=flat-square" alt="Version"></a>
-    <a href="https://github.com/yashchowdhary14/live-dual-subtitle-translator/stargazers"><img src="https://img.shields.io/github/stars/yashchowdhary14/live-dual-subtitle-translator?style=flat-square" alt="Stars"></a>
-    <a href="https://github.com/yashchowdhary14/live-dual-subtitle-translator/network/members"><img src="https://img.shields.io/github/forks/yashchowdhary14/live-dual-subtitle-translator?style=flat-square" alt="Forks"></a>
-    <a href="https://github.com/yashchowdhary14/live-dual-subtitle-translator/blob/main/LICENSE"><img src="https://img.shields.io/github/license/yashchowdhary14/live-dual-subtitle-translator?style=flat-square" alt="License"></a>
-    <a href="https://github.com/yashchowdhary14/live-dual-subtitle-translator/issues"><img src="https://img.shields.io/github/issues/yashchowdhary14/live-dual-subtitle-translator?style=flat-square" alt="Issues"></a>
-    <a href="https://github.com/yashchowdhary14/live-dual-subtitle-translator/pulls"><img src="https://img.shields.io/github/issues-pr/yashchowdhary14/live-dual-subtitle-translator?style=flat-square" alt="PRs"></a>
+    <a href="https://github.com/yashchowdhary14/live-dual-subtitle-translator/stargazers"><img src="https://img.shields.io/github/stars/yashchowdhary14/live-dual-subtitle-translator?style=flat-square&color=blue" alt="Stars"></a>
+    <a href="https://github.com/yashchowdhary14/live-dual-subtitle-translator/network/members"><img src="https://img.shields.io/github/forks/yashchowdhary14/live-dual-subtitle-translator?style=flat-square&color=blue" alt="Forks"></a>
+    <a href="https://github.com/yashchowdhary14/live-dual-subtitle-translator/issues"><img src="https://img.shields.io/github/issues/yashchowdhary14/live-dual-subtitle-translator?style=flat-square&color=blue" alt="Issues"></a>
+    <a href="https://github.com/yashchowdhary14/live-dual-subtitle-translator/blob/main/LICENSE"><img src="https://img.shields.io/github/license/yashchowdhary14/live-dual-subtitle-translator?style=flat-square&color=blue" alt="License"></a>
     <a href="https://github.com/yashchowdhary14/live-dual-subtitle-translator/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/yashchowdhary14/live-dual-subtitle-translator/build.yml?branch=main&style=flat-square" alt="Build Status"></a>
   </p>
 
   <p>
-    <a href="#installation"><img src="https://img.shields.io/badge/Chrome-Web_Store-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white" alt="Chrome Extension"></a>
-    <a href="#installation"><img src="https://img.shields.io/badge/Firefox-Add_ons-FF7139?style=for-the-badge&logo=firefox-browser&logoColor=white" alt="Firefox Add-on"></a>
+    <a href="#installation"><strong>Install Extension</strong></a> ·
+    <a href="#configuration--usage"><strong>Documentation</strong></a> ·
+    <a href="https://github.com/yashchowdhary14/live-dual-subtitle-translator/issues"><strong>Report Issue</strong></a> ·
+    <a href="https://github.com/yashchowdhary14/live-dual-subtitle-translator/stargazers"><strong>Star Repository</strong></a>
   </p>
 </div>
 
@@ -24,20 +22,33 @@
 
 ## 📖 Overview
 
-**Live Dual Subtitle Translator** is a browser extension that translates video subtitles in real-time, displaying both the original and translated subtitles simultaneously. Perfect for language learners, international audiences, or anyone wanting to enjoy content in their native language while still referencing the original audio context.
-
-![Demo GIF Placeholder](https://via.placeholder.com/800x450.png?text=Demo+GIF+Placeholder)
+This project was created to make multilingual video watching easier by displaying translated subtitles alongside original captions in real time. It is designed for language learners, international audiences, and anyone who wants to enjoy content in their native language while still referencing the original audio context.
 
 ---
 
 ## ✨ Features
 
-- 🚀 **Real-Time Translation**: Translates incoming subtitle streams dynamically using state-of-the-art AI.
-- 📺 **Dual Display**: Shows both the original and translated subtitles side-by-side or stacked.
-- ⚙️ **Bring Your Own Key (BYOK)**: Connect your preferred translation API to ensure privacy and control costs.
-- ⚡ **Lightweight & Fast**: Built with standard web technologies and optimized for zero-lag streaming.
-- 🌍 **Multi-Language Support**: Supports a wide array of source and target languages.
-- 🛡️ **Privacy First**: No tracking, no data harvesting. All processing happens between your browser and your API provider.
+- **Real-Time Translation**: Translates incoming subtitle streams dynamically without noticeable delay.
+- **Dual Display**: Shows both the original and translated subtitles side-by-side or stacked.
+- **Bring Your Own Key (BYOK)**: Connect your preferred translation provider API to ensure privacy and control over your own usage limits.
+- **Lightweight & Fast**: Built with standard web technologies and optimized for streaming.
+- **Multi-Language Support**: Supports a wide array of source and target languages based on the translation provider used.
+- **Privacy First**: No tracking or data harvesting. All processing happens between your browser and your API provider.
+
+---
+
+## 👨‍💻 Maintainer
+
+**Designed, built, and maintained as an independent open-source project.**
+
+- **Name**: Yash Chowdhary
+- **GitHub**: [@yashchowdhary14](https://github.com/yashchowdhary14)
+
+---
+
+## 📸 Demo
+
+*(Add a GIF or screenshot of the extension in action here)*
 
 ---
 
@@ -85,13 +96,13 @@ Once installed, click the extension icon to open the configuration popup.
 Users must provide their own API credentials. The repository maintainers do not ship API keys to prevent abuse.
 
 1. Open the extension settings.
-2. Select your `Translation Provider` (e.g., Gemini).
+2. Select your `Translation Provider`.
 3. Input your `API Key`.
 4. Choose your `Target Language`.
 
 Example `.env` equivalent configuration:
 ```env
-TRANSLATION_PROVIDER=gemini
+TRANSLATION_PROVIDER=your_provider
 TRANSLATION_API_KEY=your_secure_api_key_here
 TARGET_LANGUAGE=en
 ```
@@ -100,23 +111,12 @@ TARGET_LANGUAGE=en
 
 ---
 
-## 🔐 Security & Rate Limits
+## 🌐 Browser Support
 
-This project does NOT ship with production API keys. Repository maintainers are not responsible for user API usage or token exhaustion.
-
-### Rate Limits & Cost Protection
-To prevent accidental token exhaustion, we recommend:
-- Leveraging translation caching if available.
-- Monitoring your daily request limits via your API provider's dashboard.
-- Disabling auto-start on pages you don't actively need translated.
-
-### Important: Remove Secrets Before Publishing
-If you are developing locally:
-1. Always create `.env`, `.env.local`, `.env.production` files and add them to your `.gitignore`.
-2. Do **not** commit these files. Use `.env.example` to document expected variables.
-3. If you accidentally leak keys, revoke them immediately. Use `git filter-branch` to remove secrets from your commit history.
-
-Read our full [Security Policy](SECURITY.md) for more details.
+- Google Chrome (Manifest V3)
+- Mozilla Firefox
+- Microsoft Edge
+- Brave Browser
 
 ---
 
@@ -124,14 +124,14 @@ Read our full [Security Policy](SECURITY.md) for more details.
 
 The project is built as a Manifest V3 web extension consisting of:
 - **Background Service Worker**: Handles message passing, state management, and API request proxying.
-- **Content Scripts**: Intercepts subtitle DOM updates on the host video page, injects translated nodes, and manages dual-display UI.
+- **Content Scripts**: Intercepts subtitle DOM updates on the host video page, injects translated nodes, and manages the dual-display UI.
 - **Popup/Options UI**: Built with React and Vite for a smooth user experience when configuring API keys and language preferences.
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are what make the open source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
+Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
 
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
@@ -141,33 +141,29 @@ Contributions are what make the open source community such an amazing place to l
 
 Please review our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md).
 
-### Good First Issues
-Looking to get started? Check out our [Issues tab](https://github.com/yashchowdhary14/live-dual-subtitle-translator/issues) and filter by the `good first issue` or `help wanted` labels!
-
 ---
 
-## 📈 Community & Growth
+## 🛣️ Roadmap
 
-### Star History
-[![Star History Chart](https://api.star-history.com/svg?repos=yashchowdhary14/live-dual-subtitle-translator&type=Date)](https://star-history.com/#yashchowdhary14/live-dual-subtitle-translator&Date)
-
-### Contributors
-<a href="https://github.com/yashchowdhary14/live-dual-subtitle-translator/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=yashchowdhary14/live-dual-subtitle-translator" />
-</a>
+- [x] Initial release of Chrome Extension MVP
+- [ ] Implement Firefox Add-on support natively
+- [ ] Add caching to reduce translation API costs
+- [ ] Configurable hotkeys for toggling translations
+- [ ] Improved UI/UX for the extension popup
+- [ ] Custom styling options for subtitles (font, color, background)
 
 ---
 
 ## ❓ FAQ
 
-**Q: Does this extension work on Netflix/YouTube/Hulu?**  
-A: It works on video players that use standard WebVTT or DOM-based subtitle rendering. Compatibility varies by site architecture.
+**Does this extension work on Netflix/YouTube/Hulu?**  
+It works on video players that use standard WebVTT or DOM-based subtitle rendering. Compatibility varies by site architecture.
 
-**Q: Why do I need to supply my own API key?**  
-A: To keep the extension free and open-source, we cannot cover the API costs for all users. Using your own key means you only pay for what you use (or stay within free tiers).
+**Why do I need to supply my own API key?**  
+To keep the extension free and open-source, we cannot cover the API costs for all users. Using your own key means you only pay for what you use (or stay within free tiers).
 
-**Q: Is my data safe?**  
-A: Yes. All subtitle text is sent directly from your browser to your configured API provider. No middleman servers are used, and no data is collected by the extension developers.
+**Is my data safe?**  
+Yes. All subtitle text is sent directly from your browser to your configured API provider. No middleman servers are used, and no data is collected by the extension developers.
 
 ---
 
